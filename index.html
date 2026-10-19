@@ -226,20 +226,35 @@ function pushTracks(){
     applyBitrate(calls[k]);
   });
 }
+var fpsTok=0;
+function measureFps(b,base){
+  if(!video.requestVideoFrameCallback)return;
+  var tok=++fpsTok,n=0,t0=0;
+  function tick(now){
+    if(tok!==fpsTok)return;
+    if(!t0)t0=now;n++;
+    if(now-t0>=2000){b.textContent=base+" (real: "+Math.round((n-1)*1000/(now-t0))+" fps)";t0=now;n=0}
+    video.requestVideoFrameCallback(tick);
+  }
+  video.requestVideoFrameCallback(tick);
+}
 async function start(){
   stopLocal();
   var wh=sizes[quality],fps=parseInt(fpsSel.value,10),useMic=micSel.value&&micSel.value!=="none";
+  var aud=useMic?{deviceId:{exact:micSel.value},echoCancellation:false,noiseSuppression:false,autoGainControl:false}:false;
+  function vid(strict){return{deviceId:camSel.value?{exact:camSel.value}:undefined,width:{ideal:wh[0]},height:{ideal:wh[1]},frameRate:strict?{min:fps,ideal:fps}:{ideal:fps}}}
   try{
-    stream=await navigator.mediaDevices.getUserMedia({
-      video:{deviceId:camSel.value?{exact:camSel.value}:undefined,width:{ideal:wh[0]},height:{ideal:wh[1]},frameRate:{ideal:fps}},
-      audio:useMic?{deviceId:{exact:micSel.value},echoCancellation:false,noiseSuppression:false,autoGainControl:false}:false
-    });
+    try{stream=await navigator.mediaDevices.getUserMedia({video:vid(fps>30),audio:aud})}
+    catch(e0){if(fps>30&&e0.name==="OverconstrainedError"){stream=await navigator.mediaDevices.getUserMedia({video:vid(false),audio:aud})}else throw e0}
   }catch(e){say(errText(e),true);return}
   video.srcObject=stream;video.muted=!$("listen").checked;$("empty").style.display="none";
   var st=stream.getVideoTracks()[0].getSettings(),b=$("badge");
-  b.style.display="block";b.textContent=(st.width||"?")+"×"+(st.height||"?")+" · "+Math.round(st.frameRate||0)+" fps";
+  var base=(st.width||"?")+"×"+(st.height||"?")+" · "+Math.round(st.frameRate||0)+" fps";
+  b.style.display="block";b.textContent=base;
+  measureFps(b,base);
   var ok=st.height===wh[1];
-  say(ok?"Cámara lista en "+quality+"p.":"Se pidió "+quality+"p, pero la fuente entrega "+st.height+"p. Revisa la resolución de salida en OBS.",!ok);
+  var slow=fps>30&&Math.round(st.frameRate||0)<fps;
+  say(ok?(slow?"Cámara lista en "+quality+"p, pero la fuente solo entrega "+Math.round(st.frameRate||0)+" fps. Reinicia la cámara virtual en OBS.":"Cámara lista en "+quality+"p."):"Se pidió "+quality+"p, pero la fuente entrega "+st.height+"p. Revisa la resolución de salida en OBS.",!ok||slow);
   meter(stream);$("make").disabled=false;
   if(peer)pushTracks();
 }
