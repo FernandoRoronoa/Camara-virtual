@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cámara virtual OBS con enlace</title>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+:root{--bg:#eef1ee;--panel:#fbfcfb;--ink:#14201b;--muted:#5a6a62;--line:#cdd6d0;--accent:#0f7a5a;--accent-ink:#fff;--stage:#000;--warn:#b3321f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1311;--panel:#161d19;--ink:#e6efe9;--muted:#93a69b;--line:#27332d;--accent:#3ddc9a;--accent-ink:#06150e;--warn:#ff8a73}}
+:root[data-theme="dark"]{--bg:#0e1311;--panel:#161d19;--ink:#e6efe9;--muted:#93a69b;--line:#27332d;--accent:#3ddc9a;--accent-ink:#06150e;--warn:#ff8a73}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 32px}
+h1{font:700 1.5rem/1.2 Georgia,"Times New Roman",serif;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 18px;max-width:62ch}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px;align-items:start}
+@media (max-width:820px){.layout{grid-template-columns:1fr}}
+.stage{position:relative;background:var(--stage);border-radius:10px;overflow:hidden;aspect-ratio:16/9;border:1px solid var(--line)}
+video{width:100%;height:100%;object-fit:contain;display:block;background:var(--stage)}
+.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#9fb3a8;font-size:.95rem}
+.badge{position:absolute;left:10px;top:10px;background:rgba(0,0,0,.65);color:#fff;font-size:.8rem;padding:3px 9px;border-radius:99px;display:none}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:14px}
+label{display:block;font-size:.85rem;font-weight:600;margin-bottom:5px}
+select,input[type=text]{width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.seg button{padding:9px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.btn{padding:11px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:600;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--line);font-weight:500}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;gap:8px}.row .btn{flex:1}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.meter{height:10px;border-radius:99px;background:var(--bg);border:1px solid var(--line);overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:var(--accent);transition:width .06s linear}
+.chk{display:flex;gap:8px;align-items:center;font-size:.9rem}.chk input{width:18px;height:18px;accent-color:var(--accent)}
+#msg,#vmsg{font-size:.9rem;color:var(--muted);min-height:1.3em}
+.err{color:var(--warn)!important}
+.share{display:none;gap:8px}
+.count{font-weight:600}
+.help{margin-top:18px;color:var(--muted);font-size:.9rem;max-width:75ch}
+.help b{color:var(--ink)}
+#viewer{display:none}
+</style>
+</head>
+<body>
+<main>
+<!-- VISTA DEL ESPECTADOR -->
+<section id="viewer">
+  <h1>Transmisión en vivo</h1>
+  <div class="stage" style="margin-top:14px">
+    <video id="rv" autoplay playsinline muted></video>
+    <div class="empty" id="rempty">Conectando con el emisor…</div>
+  </div>
+  <div class="row" style="margin-top:12px;max-width:420px">
+    <button class="btn" id="unmute">Activar sonido</button>
+    <button class="btn ghost" id="rfull">Pantalla completa</button>
+  </div>
+  <p id="vmsg" role="status"></p>
+</section>
+
+<!-- VISTA DEL EMISOR -->
+<section id="host">
+  <h1>Cámara virtual OBS con enlace</h1>
+  <p class="sub">Conecta la cámara virtual de OBS, crea un enlace y compártelo. Quien lo abra verá tu transmisión, hasta 50 personas a la vez.</p>
+  <div class="layout">
+    <div>
+      <div class="stage">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="empty" id="empty">Pulsa «Conectar» y permite el acceso a la cámara y al micrófono.</div>
+        <div class="badge" id="badge"></div>
+      </div>
+      <p id="msg" role="status"></p>
+    </div>
+    <aside class="panel">
+      <button class="btn" id="connect">Conectar</button>
+      <div><label for="cam">Cámara de video</label><select id="cam" disabled><option>Sin conectar</option></select></div>
+      <div><label id="ql">Calidad de video</label>
+        <div class="seg" role="group" aria-labelledby="ql">
+          <button type="button" data-q="1080" aria-pressed="true">1080p</button>
+          <button type="button" data-q="720" aria-pressed="false">720p</button>
+        </div></div>
+      <div><label for="fps">Cuadros por segundo</label><select id="fps"><option value="30">30 fps</option><option value="60">60 fps</option></select></div>
+      <div><label for="br">Bitrate por espectador</label>
+        <select id="br"><option value="1500">1,5 Mbps (ligero)</option><option value="3000" selected>3 Mbps (equilibrado)</option><option value="5000">5 Mbps (máxima calidad)</option></select></div>
+      <div><label for="mic">Entrada de audio</label><select id="mic" disabled><option>Sin conectar</option></select></div>
+      <div><label>Nivel de audio</label><div class="meter"><i id="level"></i></div></div>
+      <label class="chk"><input type="checkbox" id="listen"> Escuchar el audio aquí</label>
+      <button class="btn" id="make" disabled>Crear enlace para espectadores</button>
+      <div class="share" id="share">
+        <input type="text" id="link" readonly aria-label="Enlace para espectadores">
+        <div class="row"><button class="btn ghost" id="copy">Copiar</button><button class="btn ghost" id="end">Cerrar enlace</button></div>
+        <div>Espectadores: <span class="count" id="count">0</span> de 50</div>
+      </div>
+    </aside>
+  </div>
+  <p class="help"><b>Cómo usarlo:</b> inicia la cámara virtual en OBS, pulsa Conectar y luego Crear enlace. Mantén esta pestaña abierta mientras transmites. El audio de OBS requiere un cable de audio virtual (por ejemplo VB-Cable, gratuito). <b>Importante:</b> tu conexión envía una copia del video a cada espectador, así que con 3 Mbps y 50 personas necesitarías unos 150 Mbps de subida. Si tu internet es menor, baja el bitrate o la calidad.</p>
+</section>
+</main>
+
+<script>
+(function(){
+var $=function(id){return document.getElementById(id)};
+var qs=new URLSearchParams(location.search),roomId=qs.get("v");
+var MAX=50;
+
+/* ---------- ESPECTADOR ---------- */
+if(roomId){
+  $("host").style.display="none";$("viewer").style.display="block";
+  var rv=$("rv"),vm=$("vmsg");
+  function vsay(t,e){vm.textContent=t||"";vm.className=e?"err":""}
+  $("unmute").addEventListener("click",function(){rv.muted=!rv.muted;this.textContent=rv.muted?"Activar sonido":"Silenciar";rv.play().catch(function(){})});
+  $("rfull").addEventListener("click",function(){var el=rv.parentNode;(el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el)});
+  var got=false;
+  var vp=new Peer();
+  vp.on("open",function(){
+    var c=vp.connect(roomId,{reliable:true});
+    c.on("data",function(d){if(d&&d.full){$("rempty").textContent="La transmisión está llena (50 espectadores).";vsay("Inténtalo más tarde.",true)}});
+    c.on("close",function(){if(got){$("rempty").style.display="flex";$("rempty").textContent="La transmisión terminó."}});
+    setTimeout(function(){if(!got)vsay("Tarda en llegar el video. Si el emisor no está en línea, pídele que cree el enlace de nuevo.",true)},15000);
+  });
+  vp.on("call",function(call){
+    call.answer();
+    call.on("stream",function(s){got=true;rv.srcObject=s;rv.play().catch(function(){});$("rempty").style.display="none";vsay("")});
+    call.on("close",function(){$("rempty").style.display="flex";$("rempty").textContent="La transmisión terminó."});
+  });
+  vp.on("error",function(e){
+    if(e.type==="peer-unavailable"){$("rempty").textContent="El emisor no está en línea.";vsay("Comprueba el enlace o pide uno nuevo.",true)}
+    else vsay("Error de conexión: "+e.type,true);
+  });
+  return;
+}
+
+/* ---------- EMISOR ---------- */
+var video=$("video"),camSel=$("cam"),micSel=$("mic"),fpsSel=$("fps"),msg=$("msg");
+var quality=1080,stream=null,actx=null,raf=0,connected=false,peer=null,calls={};
+var sizes={1080:[1920,1080],720:[1280,720]};
+function say(t,e){msg.textContent=t||"";msg.className=e?"err":""}
+
+function fill(sel,list,kind){
+  var prev=sel.value;sel.innerHTML="";
+  list.forEach(function(d,i){var o=document.createElement("option");o.value=d.deviceId;o.textContent=d.label||(kind+" "+(i+1));sel.appendChild(o)});
+  if(kind==="Audio"){var n=document.createElement("option");n.value="none";n.textContent="Sin audio";sel.appendChild(n)}
+  if(prev&&Array.prototype.some.call(sel.options,function(o){return o.value===prev}))sel.value=prev;
+  sel.disabled=false;
+}
+async function listDevices(){
+  var all=await navigator.mediaDevices.enumerateDevices();
+  var cams=all.filter(function(d){return d.kind==="videoinput"});
+  fill(camSel,cams,"Cámara");fill(micSel,all.filter(function(d){return d.kind==="audioinput"}),"Audio");
+  return cams;
+}
+function stopLocal(){
+  if(stream){stream.getTracks().forEach(function(t){t.stop()});stream=null}
+  cancelAnimationFrame(raf);if(actx){actx.close();actx=null}$("level").style.width="0";
+}
+function meter(s){
+  if(!s.getAudioTracks().length)return;
+  var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+  actx=new AC();var an=actx.createAnalyser();an.fftSize=512;
+  actx.createMediaStreamSource(s).connect(an);var buf=new Uint8Array(an.fftSize);
+  (function tick(){an.getByteTimeDomainData(buf);var p=0;for(var i=0;i<buf.length;i++){var v=Math.abs(buf[i]-128);if(v>p)p=v}
+    $("level").style.width=Math.min(100,p/128*140)+"%";raf=requestAnimationFrame(tick)})();
+}
+function errText(e){
+  if(e.name==="NotAllowedError")return "Permiso denegado. Habilita cámara y micrófono en el navegador.";
+  if(e.name==="NotFoundError")return "No se encontró el dispositivo. Inicia la cámara virtual en OBS y pulsa Conectar otra vez.";
+  if(e.name==="NotReadableError")return "La cámara está en uso por otra aplicación.";
+  if(e.name==="OverconstrainedError")return "El dispositivo no admite esa configuración. Prueba otra calidad o fps.";
+  return "No se pudo iniciar: "+(e.message||e.name);
+}
+function applyBitrate(call){
+  var kb=parseInt($("br").value,10)*1000,tries=0;
+  (function t(){
+    var pc=call.peerConnection,ss=pc&&pc.getSenders?pc.getSenders():[];
+    var v=ss.filter(function(s){return s.track&&s.track.kind==="video"})[0];
+    if(!v){if(tries++<10)setTimeout(t,500);return}
+    var p=v.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];
+    p.encodings[0].maxBitrate=kb;v.setParameters(p).catch(function(){});
+  })();
+}
+function pushTracks(){
+  Object.keys(calls).forEach(function(k){
+    var pc=calls[k].peerConnection;if(!pc)return;
+    pc.getSenders().forEach(function(s){
+      if(!s.track)return;
+      var nt=stream.getTracks().filter(function(t){return t.kind===s.track.kind})[0];
+      if(nt)s.replaceTrack(nt).catch(function(){});
+    });
+    applyBitrate(calls[k]);
+  });
+}
+async function start(){
+  stopLocal();
+  var wh=sizes[quality],fps=parseInt(fpsSel.value,10),useMic=micSel.value&&micSel.value!=="none";
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{deviceId:camSel.value?{exact:camSel.value}:undefined,width:{ideal:wh[0]},height:{ideal:wh[1]},frameRate:{ideal:fps}},
+      audio:useMic?{deviceId:{exact:micSel.value},echoCancellation:false,noiseSuppression:false,autoGainControl:false}:false
+    });
+  }catch(e){say(errText(e),true);return}
+  video.srcObject=stream;video.muted=!$("listen").checked;$("empty").style.display="none";
+  var st=stream.getVideoTracks()[0].getSettings(),b=$("badge");
+  b.style.display="block";b.textContent=(st.width||"?")+"×"+(st.height||"?")+" · "+Math.round(st.frameRate||0)+" fps";
+  var ok=st.height===wh[1];
+  say(ok?"Cámara lista en "+quality+"p.":"Se pidió "+quality+"p, pero la fuente entrega "+st.height+"p. Revisa la resolución de salida en OBS.",!ok);
+  meter(stream);$("make").disabled=false;
+  if(peer)pushTracks();
+}
+$("connect").addEventListener("click",async function(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){say("Este navegador no admite acceso a cámara. Usa Chrome, Edge o Firefox en https.",true);return}
+  try{var t=await navigator.mediaDevices.getUserMedia({video:true,audio:true});t.getTracks().forEach(function(x){x.stop()})}
+  catch(e){try{var t2=await navigator.mediaDevices.getUserMedia({video:true});t2.getTracks().forEach(function(x){x.stop()})}catch(e2){say(errText(e2),true);return}}
+  var cams=await listDevices();
+  var obs=cams.filter(function(d){return /obs/i.test(d.label)})[0];
+  if(obs)camSel.value=obs.deviceId;else say("No aparece «OBS Virtual Camera». Inicia la cámara virtual en OBS y pulsa Conectar otra vez.",true);
+  connected=true;$("connect").textContent="Actualizar dispositivos";start();
+});
+[camSel,micSel,fpsSel].forEach(function(s){s.addEventListener("change",function(){if(connected)start()})});
+$("br").addEventListener("change",function(){Object.keys(calls).forEach(function(k){applyBitrate(calls[k])})});
+document.querySelectorAll(".seg button").forEach(function(b){
+  b.addEventListener("click",function(){
+    quality=parseInt(b.dataset.q,10);
+    document.querySelectorAll(".seg button").forEach(function(x){x.setAttribute("aria-pressed",x===b?"true":"false")});
+    if(connected)start();
+  });
+});
+$("listen").addEventListener("change",function(){video.muted=!this.checked;if(!video.muted)video.play().catch(function(){})});
+
+function updCount(){$("count").textContent=Object.keys(calls).length}
+function closeLink(){
+  Object.keys(calls).forEach(function(k){try{calls[k].close()}catch(e){}});calls={};
+  if(peer){peer.destroy();peer=null}
+  $("share").style.display="none";$("make").style.display="";updCount();
+}
+$("make").addEventListener("click",function(){
+  if(!stream){say("Primero conecta la cámara.",true);return}
+  if(typeof Peer==="undefined"){say("No se pudo cargar el servicio de conexión. Revisa tu internet.",true);return}
+  var id="obs"+Math.random().toString(36).slice(2,9);
+  this.disabled=true;say("Creando enlace…");
+  peer=new Peer(id);
+  peer.on("open",function(){
+    $("link").value=location.origin+location.pathname+"?v="+id;
+    $("share").style.display="grid";$("make").style.display="none";$("make").disabled=false;
+    say("Enlace creado. Mantén esta pestaña abierta mientras transmites.");
+  });
+  peer.on("connection",function(conn){
+    conn.on("open",function(){
+      if(Object.keys(calls).length>=MAX){conn.send({full:true});setTimeout(function(){conn.close()},400);return}
+      var call=peer.call(conn.peer,stream);calls[conn.peer]=call;updCount();applyBitrate(call);
+      var drop=function(){delete calls[conn.peer];try{call.close()}catch(e){}updCount()};
+      conn.on("close",drop);call.on("close",drop);call.on("error",drop);
+    });
+  });
+  peer.on("error",function(e){say("Error del enlace: "+e.type+". Intenta crear el enlace otra vez.",true);$("make").disabled=false;$("make").style.display="";});
+});
+$("copy").addEventListener("click",function(){
+  var i=$("link");i.select();
+  (navigator.clipboard?navigator.clipboard.writeText(i.value):Promise.reject()).then(function(){say("Enlace copiado.")},function(){document.execCommand("copy");say("Enlace copiado.")});
+});
+$("end").addEventListener("click",function(){closeLink();say("Enlace cerrado.")});
+})();
+</script>
+</body>
+</html>
